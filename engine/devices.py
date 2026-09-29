@@ -26,7 +26,7 @@ class Server(Device):
         super().__init__(device_id, label)
         self.capacity, self.load = capacity, 8
     def receive(self, packet):
-        self.load = min(100, self.load + (7 if packet.malicious else 2))
+        self.load = min(100, self.load + (4 if packet.malicious else 2))
         return f"{self.label} load is {self.load}%."
     def cool_down(self):
         self.load = max(8, self.load - 10)

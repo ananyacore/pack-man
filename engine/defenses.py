@@ -10,7 +10,7 @@ class Defense(ABC):
 class Firewall(Defense):
     name = "Firewall"
     def inspect(self, packet):
-        return not (packet.malicious and packet.kind in {AttackKind.PORT_SCAN.value, AttackKind.MITM.value})
+        return not (packet.malicious and packet.kind == AttackKind.PORT_SCAN.value)
 
 class RateLimiter(Defense):
     name = "Rate limiter"

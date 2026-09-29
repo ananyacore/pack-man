@@ -18,6 +18,8 @@ class Simulation:
         self.enabled[kind] = bool(enabled)
     def select(self, kind):
         self.attack, self.tick_count = AttackFactory.create(kind), 0
+        self.devices["web"].load = 8
+        self.devices["dns"].load = 8
     def reset(self): self.__init__()
     def tick(self):
         self.tick_count += 1
