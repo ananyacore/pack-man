@@ -30,3 +30,7 @@ All traffic is generated inside the demonstration and never targets real systems
 The engine uses abstraction and inheritance for devices and attacks, polymorphic packet handling, composition to build a simulation, defense strategy objects, and an attack factory.
 
 During a run, the playback panel explains the path in four steps: source, router, defense, and service. **Compare this defense** automatically replays the same scenario once with its relevant defense off and once on, then summarizes how many events were blocked or reached the service and the final service load.
+
+## Roadmap
+
+See [TODO.md](TODO.md) for the next four interaction features and their suggested build order.

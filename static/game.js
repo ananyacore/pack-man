@@ -9,7 +9,7 @@
   };
   const defenseNames={firewall:'Firewall',rate_limiter:'Request throttling',dnssec:'Signed DNS',encryption:'Encryption'};
   const counterDefense={ddos:'rate_limiter',dns_spoof:'dnssec',port_scan:'firewall',mitm:'encryption'};
-  let scenario='ddos',socket=null,running=false,ticksLeft=0,timer=0,eventCount=0,blocked=0,passed=0,comparison=null;
+  let scenario='ddos',socket=null,running=false,ticksLeft=0,timer=0,eventCount=0,blocked=0,passed=0,comparison=null,rideEnabled=false,ridePending=false,rideInFlight=false;
   const button=$('#run'),toggles=[...document.querySelectorAll('[data-defense]')],
         cards=[...document.querySelectorAll('.attackBtn')];
   button.disabled=true;$('#packetCount').textContent='0';$('#scoreHint').textContent='SIMULATED PACKETS';
@@ -25,7 +25,7 @@
     mitm:[['A client sends a message','The client starts a connection to the web service through the network.'],['Someone tries to listen in','An interceptor attempts to sit between the client and service and read the passing data.'],['Encryption scrambles the contents','Encryption turns the message into unreadable data unless you have the right key.'],['The message reaches its destination','With encryption on, an interceptor may see traffic but cannot read its contents.']]
   };
   let guideIndex=0;
-  function showStep(index,where='SCENARIO GUIDE'){const i=Math.max(0,Math.min(3,index)),item=walkthroughs[scenario][i];guideIndex=i;
+  function showStep(index,where='SCENARIO GUIDE'){if(rideEnabled&&rideInFlight)return;const i=Math.max(0,Math.min(3,index)),item=walkthroughs[scenario][i];guideIndex=i;
     $('#stepNumber').textContent=`STEP 0${i+1} / 04`;$('#stepWhere').textContent=where;
     $('#stepTitle').textContent=item[0];$('#stepText').textContent=item[1];$('#guideStep').textContent=`${i+1} OF 4`;
     $('#stepProgress').style.width=`${(i+1)*25}%`;$('#backStep').disabled=i===0;$('#nextStep').disabled=i===3;
@@ -50,11 +50,12 @@
     $('#threatBar').style.width=`${Math.max(8,n)}%`;
   }
   function handle(e){
+    if(rideEnabled&&running&&(e.type==='packet'||e.type==='blocked')){e.rideDefense=defenseNames[counterDefense[scenario]];e.rideDefenseEnabled=Boolean(toggles.find(t=>t.dataset.defense===counterDefense[scenario])?.checked);}
     window.dispatchEvent(new CustomEvent('packet-event',{detail:e}));
     if(comparison){if(e.type==='blocked')comparison.current.blocked++;if(e.type==='packet'&&e.packet_kind!=='normal')comparison.current.reached++;if(e.type==='status')comparison.current.load=e.load;}
-    if(e.type==='tick')showStep(0,'TRAFFIC CREATED');
+    if(e.type==='tick'&&!rideInFlight)showStep(0,'TRAFFIC CREATED');
     if(e.type==='packet'||e.type==='blocked'){
-      showStep(e.blocked?2:1,e.blocked?'STOPPED BY DEFENSE':`${(e.destination||'router').toUpperCase()} · MOVING`);
+      if(!rideInFlight)showStep(e.blocked?2:1,e.blocked?'STOPPED BY DEFENSE':`${(e.target||'router').toUpperCase()} · MOVING`);
       eventCount++;$('#packetCount').textContent=eventCount;
       if(e.blocked){blocked++;$('#threatValue').textContent='BLOCKED';addLog(`Defense active: ${e.message.split(' blocked ')[0]} blocked this packet.`,'good')}
       else if(e.packet_kind!=='normal'){passed++;$('#threatValue').textContent='REACHED SERVICE';
@@ -63,7 +64,7 @@
         addLog(msg,'bad')
       }else addLog('Expected traffic passed through the network.','good');
     }
-    if(e.type==='status'){setLoad(e.load);showStep(3,`SERVICE LOAD ${String(e.load).padStart(2,'0')} / 100`)}
+    if(e.type==='status'){setLoad(e.load);if(!rideInFlight)showStep(3,`SERVICE LOAD ${String(e.load).padStart(2,'0')} / 100`)}
     if(e.type==='reset'){setLoad(8);$('#threatValue').textContent='READY'}
   }
   function connect(){const scheme=location.protocol==='https:'?'wss:':'ws:';
@@ -77,12 +78,19 @@
   }
   cards.forEach(card=>card.addEventListener('click',()=>setScenario(card.dataset.kind)));
   toggles.forEach(t=>t.addEventListener('change',()=>send({action:'defense',kind:t.dataset.defense,enabled:t.checked})));
-  function stop(){running=false;clearTimeout(timer);cards.forEach(c=>c.disabled=false);toggles.forEach(t=>t.disabled=false);$('#compare').disabled=false;button.textContent='▶ RUN SIMULATION';if(comparison){comparison.toggle.checked=comparison.original;send({action:'defense',kind:comparison.key,enabled:comparison.original});comparison=null}}
+  function stop(){running=false;ridePending=false;rideInFlight=false;clearTimeout(timer);document.body.classList.remove('packet-riding');$('#rideControls').hidden=true;hideRidePopup();if(rideEnabled){rideEnabled=false;$('#ride').classList.remove('on');$('#ride').textContent='◎ RIDE PACKET';window.dispatchEvent(new CustomEvent('packet-ride',{detail:{active:false}}))}cards.forEach(c=>c.disabled=false);toggles.forEach(t=>t.disabled=false);$('#compare').disabled=false;button.textContent='▶ RUN SIMULATION';if(comparison){comparison.toggle.checked=comparison.original;send({action:'defense',kind:comparison.key,enabled:comparison.original});comparison=null}}
   function summarize(result){return {outcome:result.blocked?'BLOCKED':result.reached?'REACHED SERVICE':'PASSED',detail:`${result.blocked} stopped · ${result.reached} reached · load ${result.load}/100`}}
   function finishComparison(){const off=summarize(comparison.off),on=summarize(comparison.on),key=comparison.key,toggle=comparison.toggle,original=comparison.original;$('#compareOff').textContent=off.outcome;$('#compareOffDetail').textContent=off.detail;$('#compareOn').textContent=on.outcome;$('#compareOnDetail').textContent=on.detail;$('#compareTitle').textContent=`${defenseNames[key]} · ${scenarios[scenario].label}`;comparison=null;toggle.checked=original;send({action:'defense',kind:key,enabled:original});stop();$('#threatValue').textContent=on.outcome;addLog(`Comparison complete: ${defenseNames[key]} on versus off.`,'good')}
   function step(){if(!running)return;if(ticksLeft<=0){if(comparison&&comparison.phase==='off'){comparison.off=comparison.current;comparison.phase='on';comparison.current={blocked:0,reached:0,load:8};comparison.toggle.checked=true;send({action:'defense',kind:comparison.key,enabled:true});send({action:'select',kind:scenario});$('#compareOff').textContent=summarize(comparison.off).outcome;$('#compareOffDetail').textContent=summarize(comparison.off).detail;$('#compareOn').textContent='RUNNING';$('#compareOnDetail').textContent='Defense on; replaying the same scenario.';$('#compareTitle').textContent=`${defenseNames[comparison.key]} · second run`;ticksLeft=5;showStep(0,'RUN 2 · DEFENSE ON');timer=setTimeout(step,420);return}if(comparison&&comparison.phase==='on'){comparison.on=comparison.current;finishComparison();return}stop();$('#threatValue').textContent=blocked>0&&passed===0?'BLOCKED':passed>0?'REACHED SERVICE':'COMPLETE';addLog('Simulation complete. Select another defense to compare.','good');return}
-    send({action:'tick'});ticksLeft--;timer=setTimeout(step,950)}
-  button.addEventListener('click',()=>{if(running){stop();return}running=true;ticksLeft=5;blocked=0;passed=0;eventCount=0;showStep(0,'TRAFFIC CREATED');
+    ridePending=rideEnabled;send({action:'tick'});ticksLeft--;if(ridePending){timer=setTimeout(()=>{if(ridePending){ridePending=false;rideInFlight=false;document.body.classList.remove('packet-riding');$('#rideControls').hidden=true;step()}},3500);return}timer=setTimeout(step,950)}
+  let rideToastTimer=0;
+  function hideRidePopup(){const popup=$('#ridePopup');popup.classList.remove('visible');clearTimeout(rideToastTimer);setTimeout(()=>{if(!popup.classList.contains('visible'))popup.hidden=true},320);$('#rideNav').hidden=true}
+  window.addEventListener('ride-stage',ev=>{ridePending=false;rideInFlight=true;clearTimeout(timer);document.body.classList.add('packet-riding');$('#rideControls').hidden=false;const d=ev.detail;$('#stepNumber').textContent=`STOP 0${d.index+1} / 0${d.total}`;$('#stepWhere').textContent=d.where;$('#stepTitle').textContent=d.title;$('#stepText').textContent=d.text;$('#stepProgress').style.width=`${(d.index+1)/d.total*100}%`;$('#guideStep').textContent=`${d.index+1} OF ${d.total}`;document.querySelector('.stepPanel').dataset.step=String(Math.min(4,d.index+1));$('#rideHint').textContent='Stopped here. Read this, then continue when ready.';$('#rideContinue').textContent=d.final?'FINISH PACKET →':'CONTINUE PACKET →';$('#ridePopupStep').textContent=`${d.where} · ${String(d.index+1).padStart(2,'0')} / ${String(d.total).padStart(2,'0')}`;$('#ridePopupTitle').textContent=d.title;$('#ridePopupText').textContent=d.text;const accent=typeof d.accent==='number'?`#${d.accent.toString(16).padStart(6,'0')}`:(d.accent||'#c9ee68');$('#ridePopup').style.setProperty('--ride-accent',accent);$('#rideNav').hidden=false;const popup=$('#ridePopup');popup.hidden=false;popup.classList.remove('visible');requestAnimationFrame(()=>popup.classList.add('visible'));clearTimeout(rideToastTimer);rideToastTimer=setTimeout(()=>popup.classList.remove('visible'),4200)});
+  $('#rideContinue').addEventListener('click',()=>window.dispatchEvent(new CustomEvent('ride-continue')));
+  $('#ridePopupContinue').addEventListener('click',()=>{hideRidePopup();window.dispatchEvent(new CustomEvent('ride-continue'))});
+  $('#rideExit').addEventListener('click',()=>$('#ride').click());
+  window.addEventListener('ride-complete',ev=>{rideInFlight=false;ridePending=false;clearTimeout(timer);document.body.classList.remove('packet-riding');$('#rideControls').hidden=true;hideRidePopup();if(running)timer=setTimeout(step,ev.detail?.cancelled?250:450)});
+  button.addEventListener('click',()=>{if(running){stop();return}running=true;ticksLeft=rideEnabled?1:5;blocked=0;passed=0;eventCount=0;showStep(0,'TRAFFIC CREATED');
     $('#packetCount').textContent='0';$('#threatValue').textContent='RUNNING';
     cards.forEach(c=>c.disabled=true);toggles.forEach(t=>t.disabled=true);button.textContent='Ⅱ PAUSE';
     addLog(`Running: ${scenarios[scenario].label}.`,'good');step()});
@@ -91,6 +99,8 @@
     send({action:'reset'});for(const t of toggles)send({action:'defense',kind:t.dataset.defense,enabled:t.checked});send({action:'select',kind:scenario});
     $('#threatValue').textContent='READY';setLoad(8);addLog('Simulation reset.','good')});
   $('#concepts').addEventListener('click',()=>$('#modal').classList.add('open'));
+  $('#ride').addEventListener('click',()=>{rideEnabled=!rideEnabled;const ride=$('#ride');ride.classList.toggle('on',rideEnabled);ride.textContent=rideEnabled?'◉ PACKET STOPS ON':'◎ RIDE PACKET';window.dispatchEvent(new CustomEvent('packet-ride',{detail:{active:rideEnabled}}));if(rideEnabled)addLog('Slow packet walkthrough armed. Run the simulation; each component will wait for you.','good');else{rideInFlight=false;ridePending=false;document.body.classList.remove('packet-riding');$('#rideControls').hidden=true;addLog('Returned to the network overview.','good')}});
+  window.addEventListener('impact-flash',e=>{const kind=e.detail?.kind==='blocked'?'impact-blocked':'impact-danger';document.body.classList.remove('impact-blocked','impact-danger');void document.body.offsetWidth;document.body.classList.add(kind);setTimeout(()=>document.body.classList.remove(kind),500)});
   $('#close').addEventListener('click',()=>$('#modal').classList.remove('open'));
   $('#modal').addEventListener('click',e=>{if(e.target.id==='modal')e.currentTarget.classList.remove('open')});
 
