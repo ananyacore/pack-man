@@ -19,10 +19,30 @@
     const list=$('#logItems');list.prepend(row);while(list.children.length>7)list.lastChild.remove();
   }
   const walkthroughs={
-    ddos:[['A visitor asks for a page','A normal client sends one request to the web server. The router carries it there.'],['A crowd arrives at once','Many infected computers send requests together. This overload is called a DDoS.'],['The network checks the rush','Request throttling limits how many requests the server accepts in a short time.'],['The server feels the difference','With throttling off, requests pile up. With it on, fewer get through at once.']],
-    dns_spoof:[['A device asks for a name','DNS is the internet’s address book: it finds the numeric address for a site name.'],['A fake answer appears','An attacker sends a made-up address, hoping the device will visit the wrong site.'],['The answer is checked','Signed DNS lets the resolver check that the reply came from the real source and was not changed.'],['The device chooses where to go','A valid reply leads to the real service. An unchecked fake reply can send it elsewhere.']],
-    port_scan:[['Services have numbered doors','A server offers different services through numbered connection points called ports.'],['A scanner tries the doors','The scanner checks ports one by one to learn which services respond.'],['The firewall checks each try','Firewall rules can reject probes that should not reach those services.'],['The server reveals less','Blocked probes get no useful answer. Allowed probes can reveal which services are open.']],
-    mitm:[['A client sends a message','The client starts a connection to the web service through the network.'],['Someone tries to listen in','An interceptor attempts to sit between the client and service and read the passing data.'],['Encryption scrambles the contents','Encryption turns the message into unreadable data unless you have the right key.'],['The message reaches its destination','With encryption on, an interceptor may see traffic but cannot read its contents.']]
+    ddos:[
+      ['1 · One ordinary request','A visitor asks the web server for a page. The client sends a request and the router forwards it toward the web service. One request is normal; the problem is not the request itself.'],
+      ['2 · Many devices repeat it','A group of compromised devices sends requests at nearly the same time. The simulation represents that crowd with several packets. Each request asks the server to do work, so its workload and load can grow.'],
+      ['3 · A rate limit sets a pace','Request throttling counts requests during this time slice and lets only a limited number continue. In this demo, the limit resets on the next tick. It reduces a burst; it does not identify who owns every device.'],
+      ['4 · Compare the server load','With throttling off, more requests reach the web server and add work. With it on, excess requests are blocked before delivery. Watch the green service node and load meter to compare the effect.']
+    ],
+    dns_spoof:[
+      ['1 · The device needs an address','People use names such as example.com, while computers route traffic using numeric IP addresses. A device asks a DNS resolver to look up the address for a name.'],
+      ['2 · A forged answer competes','An attacker tries to make the device accept a false name-to-address answer. If trusted, the device could connect to the attacker’s destination while believing it reached the intended site.'],
+      ['3 · The resolver checks trust','Signed DNS validation checks whether the answer has valid cryptographic signatures and belongs to the expected DNS data. This simulation simplifies that into a rule that rejects its marked forged reply.'],
+      ['4 · The device uses the accepted answer','A rejected forgery should not replace the trusted result; a valid answer can be used for the connection. Follow the amber DNS service and compare Signed DNS on and off.']
+    ],
+    port_scan:[
+      ['1 · A server has service doors','A port is a numbered endpoint used by a network service. For example, a server may offer web traffic on one port and remote administration on another. A port is a logical connection point, not a physical hole.'],
+      ['2 · The scanner checks numbers','A scanner sends small probes to different ports and observes the replies. An answer can suggest a service is listening; no answer may mean closed, filtered, or unreachable. This demo cycles through example numbers; it contacts no real ports and does not model genuine open or closed responses.'],
+      ['3 · Rules inspect each probe','A firewall compares traffic with its configured rules. Here, the simplified firewall blocks packets marked as malicious port scans. Real firewall rules can consider addresses, ports, protocols, connection state, and other context.'],
+      ['4 · Notice what is revealed','If a probe is blocked, the service does not process it in this simulation. A real scanner learns from the service response; this model only shows whether the firewall blocks the probe, not whether a port is truly open. Scanning is discovery, not automatically a break-in.']
+    ],
+    mitm:[
+      ['1 · The client starts a conversation','A client sends data toward a service through the router. Normally, both sides expect the network to carry the data to the right destination.'],
+      ['2 · An interceptor gets between them','A man-in-the-middle position lets an attacker try to observe or alter traffic while pretending to each side that communication is normal. Getting into that position is a separate challenge; this demo starts with an intercepted packet to focus on the risk.'],
+      ['3 · Encryption protects the contents','With properly authenticated encryption, a network observer may see that data is moving but should not be able to read or silently change the protected contents. Encryption does not hide every detail, such as the fact that a connection exists.'],
+      ['4 · Separate visibility from readability','The message can still travel to its destination while its contents remain protected. The demo models the protection as blocking the marked interception event; real encrypted connections usually protect data rather than make every packet disappear.']
+    ]
   };
   let guideIndex=0;
   function showStep(index,where='SCENARIO GUIDE'){if(rideEnabled&&rideInFlight)return;const i=Math.max(0,Math.min(3,index)),item=walkthroughs[scenario][i];guideIndex=i;
@@ -34,11 +54,13 @@
     window.dispatchEvent(new CustomEvent('walkthrough-step',{detail:{scenario,index:i}}));
   }
   $('#backStep').addEventListener('click',()=>showStep(guideIndex-1));$('#nextStep').addEventListener('click',()=>showStep(guideIndex+1));
+  document.querySelector('.walkDetails').addEventListener('toggle',()=>{
+    if(document.querySelector('.walkDetails').open)window.dispatchEvent(new CustomEvent('walkthrough-step',{detail:{scenario,index:guideIndex}}));
+    else window.dispatchEvent(new CustomEvent('walkthrough-close'));
+  });
   function send(data){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(data))}
-  function setScenario(kind){if(running||!scenarios[kind])return;scenario=kind;const item=scenarios[kind];
+  function setScenario(kind){if(running||!scenarios[kind])return;scenario=kind;const item=scenarios[kind];document.documentElement.style.setProperty('--scenario-accent',({ddos:'#ed8b18',dns_spoof:'#8655d6',port_scan:'#0798ae',mitm:'#df4e7a'})[kind]);
     cards.forEach(card=>card.classList.toggle('active',card.dataset.kind===kind));
-    $('#attackKicker').textContent='WHAT HAPPENS';$('#attackName').textContent=item.title;
-    $('#attackText').textContent=item.detail;$('#analogy').textContent=item.tip;
     $('#threatValue').textContent='READY';$('#threatBar').style.width='8%';
     eventCount=0;blocked=0;passed=0;$('#packetCount').textContent='0';
     showStep(0,'SCENARIO GUIDE');
@@ -66,6 +88,7 @@
     }
     if(e.type==='status'){setLoad(e.load);if(!rideInFlight)showStep(3,`SERVICE LOAD ${String(e.load).padStart(2,'0')} / 100`)}
     if(e.type==='reset'){setLoad(8);$('#threatValue').textContent='READY'}
+    if(rideEnabled&&running&&!document.documentElement.classList.contains('has-3d')&&!rideInFlight&&((e.type==='packet'&&e.packet_kind!=='normal')||e.type==='blocked'))startFallbackRide(e);
   }
   function connect(){const scheme=location.protocol==='https:'?'wss:':'ws:';
     socket=new WebSocket(`${scheme}//${location.host}/ws`);
@@ -83,11 +106,44 @@
   function finishComparison(){const off=summarize(comparison.off),on=summarize(comparison.on),key=comparison.key,toggle=comparison.toggle,original=comparison.original;$('#compareOff').textContent=off.outcome;$('#compareOffDetail').textContent=off.detail;$('#compareOn').textContent=on.outcome;$('#compareOnDetail').textContent=on.detail;$('#compareTitle').textContent=`${defenseNames[key]} · ${scenarios[scenario].label}`;comparison=null;toggle.checked=original;send({action:'defense',kind:key,enabled:original});stop();$('#threatValue').textContent=on.outcome;addLog(`Comparison complete: ${defenseNames[key]} on versus off.`,'good')}
   function step(){if(!running)return;if(ticksLeft<=0){if(comparison&&comparison.phase==='off'){comparison.off=comparison.current;comparison.phase='on';comparison.current={blocked:0,reached:0,load:8};comparison.toggle.checked=true;send({action:'defense',kind:comparison.key,enabled:true});send({action:'select',kind:scenario});$('#compareOff').textContent=summarize(comparison.off).outcome;$('#compareOffDetail').textContent=summarize(comparison.off).detail;$('#compareOn').textContent='RUNNING';$('#compareOnDetail').textContent='Defense on; replaying the same scenario.';$('#compareTitle').textContent=`${defenseNames[comparison.key]} · second run`;ticksLeft=5;showStep(0,'RUN 2 · DEFENSE ON');timer=setTimeout(step,420);return}if(comparison&&comparison.phase==='on'){comparison.on=comparison.current;finishComparison();return}stop();$('#threatValue').textContent=blocked>0&&passed===0?'BLOCKED':passed>0?'REACHED SERVICE':'COMPLETE';addLog('Simulation complete. Select another defense to compare.','good');return}
     ridePending=rideEnabled;send({action:'tick'});ticksLeft--;if(ridePending){timer=setTimeout(()=>{if(ridePending){ridePending=false;rideInFlight=false;document.body.classList.remove('packet-riding');$('#rideControls').hidden=true;step()}},3500);return}timer=setTimeout(step,950)}
-  let rideToastTimer=0;
-  function hideRidePopup(){const popup=$('#ridePopup');popup.classList.remove('visible');clearTimeout(rideToastTimer);setTimeout(()=>{if(!popup.classList.contains('visible'))popup.hidden=true},320);$('#rideNav').hidden=true}
-  window.addEventListener('ride-stage',ev=>{ridePending=false;rideInFlight=true;clearTimeout(timer);document.body.classList.add('packet-riding');$('#rideControls').hidden=false;const d=ev.detail;$('#stepNumber').textContent=`STOP 0${d.index+1} / 0${d.total}`;$('#stepWhere').textContent=d.where;$('#stepTitle').textContent=d.title;$('#stepText').textContent=d.text;$('#stepProgress').style.width=`${(d.index+1)/d.total*100}%`;$('#guideStep').textContent=`${d.index+1} OF ${d.total}`;document.querySelector('.stepPanel').dataset.step=String(Math.min(4,d.index+1));$('#rideHint').textContent='Stopped here. Read this, then continue when ready.';$('#rideContinue').textContent=d.final?'FINISH PACKET →':'CONTINUE PACKET →';$('#ridePopupStep').textContent=`${d.where} · ${String(d.index+1).padStart(2,'0')} / ${String(d.total).padStart(2,'0')}`;$('#ridePopupTitle').textContent=d.title;$('#ridePopupText').textContent=d.text;const accent=typeof d.accent==='number'?`#${d.accent.toString(16).padStart(6,'0')}`:(d.accent||'#c9ee68');$('#ridePopup').style.setProperty('--ride-accent',accent);$('#rideNav').hidden=false;const popup=$('#ridePopup');popup.hidden=false;popup.classList.remove('visible');requestAnimationFrame(()=>popup.classList.add('visible'));clearTimeout(rideToastTimer);rideToastTimer=setTimeout(()=>popup.classList.remove('visible'),4200)});
-  $('#rideContinue').addEventListener('click',()=>window.dispatchEvent(new CustomEvent('ride-continue')));
-  $('#ridePopupContinue').addEventListener('click',()=>{hideRidePopup();window.dispatchEvent(new CustomEvent('ride-continue'))});
+  let fallbackStages=[],fallbackStage=0;
+  function startFallbackRide(e){
+    const narration={
+      ddos:[
+        'WHAT IS HAPPENING\nSeveral simulated bot clients send requests toward one service at almost the same time. Each request can look ordinary on its own; the harmful part is the shared burst of work.\n\nWHY IT MATTERS\nA real distributed denial-of-service attack uses many compromised or rented devices and may also consume network capacity before traffic reaches the server.\n\nTHIS DEMO\nThe pink packet stands for one request from that crowd. Nothing here creates real traffic.',
+        'WHAT IS HAPPENING\nThe router reads the destination address and forwards this request to the next network hop. It moves traffic; it does not decide that the request is harmless just because it can route it.\n\nREAL NETWORKS\nA connection can cross multiple routers operated by different networks. This teaching view draws one edge router to keep the route understandable.',
+        'WHAT IS HAPPENING\nRequest throttling counts how many requests arrive in a short window and limits how many the service accepts. Excess requests can be delayed or rejected.\n\nLIMIT\nRate limits reduce bursts, but large distributed attacks can spread traffic across many sources. Real defenses often combine application limits with upstream filtering, caching, and monitoring. This demo uses a simple per-step counter.',
+        'WHAT IS HAPPENING\nRequests that pass the checkpoint make the web service do work. As the burst grows, less time and capacity remain for ordinary visitors.\n\nWHAT TO NOTICE\nCompare the load with throttling off and on. The meter is a teaching signal; this simulation does not measure a real server or reproduce a real request queue.'
+      ],
+      dns_spoof:[
+        'WHAT IS HAPPENING\nA device asks the DNS resolver which network address belongs to a site name. DNS is the lookup step that lets people use names while computers connect using addresses.\n\nTHIS DEMO\nThe normal lookup is shown as a simple packet. No public DNS system is contacted.',
+        'WHAT IS HAPPENING\nA forged answer claims the site name points to an attacker-chosen address. If a device or resolver accepts and stores it, a later connection could go to the wrong destination.\n\nREAL NETWORKS\nPoisoning can target different caches and depends on how answers are validated and how long they are kept.',
+        'WHAT IS HAPPENING\nSigned DNS validation checks that an answer has the expected cryptographic signatures. It helps detect changed or forged DNS data; it does not encrypt the lookup itself.\n\nTHIS DEMO\nThere is no real DNSSEC cryptography here. A simulated marker stands in for the validation result.',
+        'WHAT IS HAPPENING\nThe resolver gives the client the accepted address. A false answer could misdirect a later connection; a rejected answer should not replace the trusted result.\n\nTHIS DEMO\nThe scene illustrates that decision only. It does not make DNS queries or store a live cache.'
+      ],
+      port_scan:[
+        'WHAT IS HAPPENING\nA scanner sends small probes to numbered service ports and notes what responds. A port is a logical endpoint that network software uses to offer a service.\n\nWHY IT MATTERS\nThe replies can reveal which services might be available. Discovery is not the same as logging in or exploiting a service.',
+        'WHAT IS HAPPENING\nThe router forwards probes toward the target network. It transports the packets; access rules at the firewall or service decide what happens next.\n\nREAL NETWORKS\nScans can use different protocols and timing. This diagram simplifies the path to one router and a few visible probes.',
+        'WHAT IS HAPPENING\nThe firewall compares the probe with its rules. A rule can use source and destination, port, protocol, and connection state to allow or reject traffic.\n\nLIMIT\nA firewall reduces exposure but does not patch vulnerable services. This demo simply marks scan packets and applies a teaching rule.',
+        'WHAT IS HAPPENING\nOpen, closed, and filtered ports may respond differently in a real scan. Those responses help build an inventory of exposed services.\n\nTHIS DEMO\nIt does not maintain real port states, send probes, or contact another computer.'
+      ],
+      mitm:[
+        'WHAT IS HAPPENING\nA client sends a message toward a service while a simulated interceptor has already gained a position in the route. Reaching that position is a separate real-world step.\n\nRISK\nWithout protection, an intermediary may try to observe or change data in transit.',
+        'WHAT IS HAPPENING\nThe router forwards the message toward its destination. An attacker-controlled route could expose traffic to an intermediary, but the router itself is not automatically the attacker.\n\nREAL NETWORKS\nThe route may cross many networks. This scene begins after the interception position has been established.',
+        'WHAT IS HAPPENING\nHTTPS uses TLS to authenticate the service and encrypt application data. Authenticated encryption is designed to make silent changes detectable as well as hide contents.\n\nLIMIT\nSome connection details, such as endpoints and timing, may still be visible. This model does not implement TLS; it uses a simplified allow/block result.',
+        'WHAT IS HAPPENING\nThe intended service receives the message. The client and service can use protected contents while an intermediary should not be able to read them.\n\nTHIS DEMO\nNo real message is sent, and the interceptor behavior is only a visual teaching model.'
+      ]
+    };
+    const names=scenario==='ddos'?['Bot clients','Edge router','Request control','Web server']:scenario==='dns_spoof'?['Client','DNS server','Signed DNS check','DNS server']:scenario==='port_scan'?['Scanner','Edge router','Firewall','Web server']:['Client','Edge router','Encryption check','Web server'];
+    const places=['SOURCE','ROUTER','DEFENSE CHECK',scenario==='dns_spoof'?'DNS SERVER':'WEB SERVER'];
+    const accents=['#ef6792','#9270d2','#a6cc35','#35a9bb'];
+    const max=e.blocked?3:4;fallbackStages=narration[scenario].slice(0,max).map((text,index)=>({where:places[index],title:names[index],text,index,total:max,final:index===max-1,nodeName:names[index],accent:accents[index]}));fallbackStage=0;ridePending=false;rideInFlight=true;clearTimeout(timer);document.body.classList.add('packet-riding');$('#rideControls').hidden=false;showFallbackRideStage();
+  }
+  function showFallbackRideStage(){const item=fallbackStages[fallbackStage];if(!item)return;const active=[...$('#fallbackScene').querySelectorAll('.fbnode')].find(n=>n.querySelector('.label')?.textContent.toLowerCase()===item.nodeName.toLowerCase());$('#fallbackScene').querySelectorAll('.fbnode').forEach(n=>n.removeAttribute('data-ride-focus'));if(active)active.dataset.rideFocus='true';window.dispatchEvent(new CustomEvent('ride-stage',{detail:item}))}
+  window.addEventListener('ride-continue',()=>{if(document.documentElement.classList.contains('has-3d')||!fallbackStages.length)return;if(fallbackStage<fallbackStages.length-1){fallbackStage++;showFallbackRideStage()}else{fallbackStages=[];$('#fallbackScene').querySelectorAll('.fbnode').forEach(n=>n.removeAttribute('data-ride-focus'));window.dispatchEvent(new CustomEvent('ride-complete',{detail:{cancelled:false}}))}});  let rideToastTimer=0;
+  function hideRidePopup(){const popup=$('#ridePopup');popup.classList.remove('visible');clearTimeout(rideToastTimer);setTimeout(()=>{if(!popup.classList.contains('visible'))popup.hidden=true},320);$('#rideControls').hidden=true}
+  window.addEventListener('ride-stage',ev=>{ridePending=false;rideInFlight=true;clearTimeout(timer);document.body.classList.add('packet-riding');$('#rideControls').hidden=false;const d=ev.detail;$('#stepNumber').textContent=`STOP 0${d.index+1} / 0${d.total}`;$('#stepWhere').textContent=d.where;$('#stepTitle').textContent=d.title;$('#stepText').textContent=d.text;$('#stepProgress').style.width=`${(d.index+1)/d.total*100}%`;$('#guideStep').textContent=`${d.index+1} OF ${d.total}`;document.querySelector('.stepPanel').dataset.step=String(Math.min(4,d.index+1));$('#rideContinue').textContent=d.final?'FINISH PACKET →':'CONTINUE PACKET →';$('#ridePopupStep').textContent=`${d.where} · ${String(d.index+1).padStart(2,'0')} / ${String(d.total).padStart(2,'0')}`;$('#ridePopupTitle').textContent=d.title;$('#ridePopupText').textContent=d.text;const accent=typeof d.accent==='number'?`#${d.accent.toString(16).padStart(6,'0')}`:(d.accent||'#c9ee68');$('#ridePopup').style.setProperty('--ride-accent',accent);$('#rideControls').hidden=false;const popup=$('#ridePopup');popup.hidden=false;popup.classList.remove('visible');requestAnimationFrame(()=>popup.classList.add('visible'));clearTimeout(rideToastTimer)});
+  $('#rideContinue').addEventListener('click',()=>{hideRidePopup();window.dispatchEvent(new CustomEvent('ride-continue'))});
   $('#rideExit').addEventListener('click',()=>$('#ride').click());
   window.addEventListener('ride-complete',ev=>{rideInFlight=false;ridePending=false;clearTimeout(timer);document.body.classList.remove('packet-riding');$('#rideControls').hidden=true;hideRidePopup();if(running)timer=setTimeout(step,ev.detail?.cancelled?250:450)});
   button.addEventListener('click',()=>{if(running){stop();return}running=true;ticksLeft=rideEnabled?1:5;blocked=0;passed=0;eventCount=0;showStep(0,'TRAFFIC CREATED');
